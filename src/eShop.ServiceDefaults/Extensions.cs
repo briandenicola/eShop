@@ -5,9 +5,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
+
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Exporter.Prometheus;
+using Azure.Monitor.OpenTelemetry.AspNetCore;
 
 namespace eShop.ServiceDefaults;
 
@@ -55,12 +61,19 @@ public static partial class Extensions
             logging.IncludeScopes = true;
         });
 
+        var azureMonitorUri = builder.Configuration.GetRequiredValue("APP_INSIGHTS_CONNECTION_STRING");
+
         builder.Services.AddOpenTelemetry()
+            .UseAzureMonitor( o => {  
+                o.ConnectionString = azureMonitorUri;
+                o.SamplingRatio = 0.1F; 
+            })        
             .WithMetrics(metrics =>
             {
                 metrics.AddAspNetCoreInstrumentation()
                     .AddHttpClientInstrumentation()
-                    .AddRuntimeInstrumentation();
+                    .AddRuntimeInstrumentation()
+                    .AddPrometheusExporter(o => o.DisableTotalNameSuffixForCounters = true);  //https://github.com/open-telemetry/opentelemetry-dotnet/issues/5502
             })
             .WithTracing(tracing =>
             {
@@ -86,9 +99,20 @@ public static partial class Extensions
 
         if (useOtlpExporter)
         {
-            builder.Services.Configure<OpenTelemetryLoggerOptions>(logging => logging.AddOtlpExporter());
-            builder.Services.ConfigureOpenTelemetryMeterProvider(metrics => metrics.AddOtlpExporter());
-            builder.Services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddOtlpExporter());
+            var otelUri = builder.Configuration.GetRequiredValue("OTEL_EXPORTER_OTLP_ENDPOINT");
+
+            builder.Services.Configure<OpenTelemetryLoggerOptions>(logging => logging.AddOtlpExporter( opt => {
+                opt.Protocol = OtlpExportProtocol.Grpc;
+                opt.Endpoint = new Uri(otelUri) ;
+            }));
+            builder.Services.ConfigureOpenTelemetryMeterProvider(metrics => metrics.AddOtlpExporter( opt => {
+                opt.Protocol = OtlpExportProtocol.Grpc;
+                opt.Endpoint = new Uri(otelUri);
+            }));
+            builder.Services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddOtlpExporter( opt => {
+                opt.Protocol = OtlpExportProtocol.Grpc;
+                opt.Endpoint = new Uri(otelUri);
+            }));
         }
 
         return builder;
