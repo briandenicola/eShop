@@ -55,31 +55,17 @@ public static partial class Extensions
 
     public static IHostApplicationBuilder ConfigureOpenTelemetry(this IHostApplicationBuilder builder)
     {
-        builder.Logging.AddOpenTelemetry(logging =>
-        {
-            logging.IncludeFormattedMessage = true;
-            logging.IncludeScopes = true;
-        });
-
-        var azureMonitorUri = builder.Configuration.GetRequiredValue("APP_INSIGHTS_CONNECTION_STRING");
-
-        builder.Services.AddOpenTelemetry()
-            .UseAzureMonitor( o => {  
-                o.ConnectionString = azureMonitorUri;
-                o.SamplingRatio = 0.1F; 
-            })        
+        builder.Services.AddOpenTelemetry()     
             .WithMetrics(metrics =>
             {
                 metrics.AddAspNetCoreInstrumentation()
                     .AddHttpClientInstrumentation()
-                    .AddRuntimeInstrumentation()
-                    .AddPrometheusExporter(o => o.DisableTotalNameSuffixForCounters = true);  //https://github.com/open-telemetry/opentelemetry-dotnet/issues/5502
+                    .AddRuntimeInstrumentation();
             })
             .WithTracing(tracing =>
             {
                 if (builder.Environment.IsDevelopment())
                 {
-                    // We want to view all traces in development
                     tracing.SetSampler(new AlwaysOnSampler());
                 }
 
@@ -101,14 +87,23 @@ public static partial class Extensions
         {
             var otelUri = builder.Configuration.GetRequiredValue("OTEL_EXPORTER_OTLP_ENDPOINT");
 
-            builder.Services.Configure<OpenTelemetryLoggerOptions>(logging => logging.AddOtlpExporter( opt => {
-                opt.Protocol = OtlpExportProtocol.Grpc;
-                opt.Endpoint = new Uri(otelUri) ;
-            }));
-            builder.Services.ConfigureOpenTelemetryMeterProvider(metrics => metrics.AddOtlpExporter( opt => {
-                opt.Protocol = OtlpExportProtocol.Grpc;
-                opt.Endpoint = new Uri(otelUri);
-            }));
+            builder.Logging.AddOpenTelemetry( logging => {
+                logging.IncludeFormattedMessage = true;
+                logging.IncludeScopes = true;                
+                logging.AddOtlpExporter( opt => {
+                    opt.Protocol = OtlpExportProtocol.Grpc;
+                    opt.Endpoint = new Uri(otelUri);
+                });
+            });
+            builder.Services.ConfigureOpenTelemetryMeterProvider(metrics => {                
+                metrics.AddPrometheusExporter( opt => {
+                    opt.DisableTotalNameSuffixForCounters = true;  //https://github.com/open-telemetry/opentelemetry-dotnet/issues/5502
+                });
+                metrics.AddOtlpExporter( opt => {
+                    opt.Protocol = OtlpExportProtocol.Grpc;
+                    opt.Endpoint = new Uri(otelUri);
+                });
+            });
             builder.Services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddOtlpExporter( opt => {
                 opt.Protocol = OtlpExportProtocol.Grpc;
                 opt.Endpoint = new Uri(otelUri);
