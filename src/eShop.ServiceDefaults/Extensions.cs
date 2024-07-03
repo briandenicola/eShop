@@ -21,6 +21,9 @@ public static partial class Extensions
 {
     public static IHostApplicationBuilder AddServiceDefaults(this IHostApplicationBuilder builder)
     {
+        // Enable Semantic Kernel OpenTelemetry
+        AppContext.SetSwitch("Microsoft.SemanticKernel.Experimental.GenAI.EnableOTelDiagnosticsSensitive", true);
+
         builder.AddBasicServiceDefaults();
 
         builder.Services.AddServiceDiscovery();
@@ -61,6 +64,9 @@ public static partial class Extensions
                 metrics.AddAspNetCoreInstrumentation()
                     .AddHttpClientInstrumentation()
                     .AddRuntimeInstrumentation();
+
+                // Configure Semantic Kernel telemetry
+                metrics.AddMeter("Microsoft.SemanticKernel*");                    
             })
             .WithTracing(tracing =>
             {
@@ -72,6 +78,9 @@ public static partial class Extensions
                 tracing.AddAspNetCoreInstrumentation()
                     .AddGrpcClientInstrumentation()
                     .AddHttpClientInstrumentation();
+
+                // Configure Semantic Kernel telemetry
+                tracing.AddSource("Microsoft.SemanticKernel*");                    
             });
 
         builder.AddOpenTelemetryExporters();
