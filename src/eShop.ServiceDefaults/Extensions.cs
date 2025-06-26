@@ -5,9 +5,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Exporter.Prometheus;
+
 
 namespace eShop.ServiceDefaults;
 
@@ -88,9 +93,29 @@ public static partial class Extensions
 
         if (useOtlpExporter)
         {
-            builder.Services.Configure<OpenTelemetryLoggerOptions>(logging => logging.AddOtlpExporter());
-            builder.Services.ConfigureOpenTelemetryMeterProvider(metrics => metrics.AddOtlpExporter());
-            builder.Services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddOtlpExporter());
+            var otelUri = builder.Configuration.GetRequiredValue("OTEL_EXPORTER_OTLP_ENDPOINT");
+
+            builder.Logging.AddOpenTelemetry( logging => {
+                logging.IncludeFormattedMessage = true;
+                logging.IncludeScopes = true;                
+                logging.AddOtlpExporter( opt => {
+                    opt.Protocol = OtlpExportProtocol.Grpc;
+                    opt.Endpoint = new Uri(otelUri);
+                });
+            });
+            builder.Services.ConfigureOpenTelemetryMeterProvider(metrics => {                
+                metrics.AddPrometheusExporter( opt => {
+                    opt.DisableTotalNameSuffixForCounters = true;  //https://github.com/open-telemetry/opentelemetry-dotnet/issues/5502
+                });
+                metrics.AddOtlpExporter( opt => {
+                    opt.Protocol = OtlpExportProtocol.Grpc;
+                    opt.Endpoint = new Uri(otelUri);
+                });
+            });
+            builder.Services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddOtlpExporter( opt => {
+                opt.Protocol = OtlpExportProtocol.Grpc;
+                opt.Endpoint = new Uri(otelUri);
+            }));
         }
 
         return builder;
@@ -107,22 +132,22 @@ public static partial class Extensions
 
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
-        // Uncomment the following line to enable the Prometheus endpoint (requires the OpenTelemetry.Exporter.Prometheus.AspNetCore package)
-        // app.MapPrometheusScrapingEndpoint();
+        app.MapPrometheusScrapingEndpoint();
+        app.MapHealthChecks("/health");
 
         // Adding health checks endpoints to applications in non-development environments has security implications.
         // See https://aka.ms/dotnet/aspire/healthchecks for details before enabling these endpoints in non-development environments.
-        if (app.Environment.IsDevelopment())
-        {
-            // All health checks must pass for app to be considered ready to accept traffic after starting
-            app.MapHealthChecks("/health");
+        // if (app.Environment.IsDevelopment())
+        // {
+        //     // All health checks must pass for app to be considered ready to accept traffic after starting
+        //     app.MapHealthChecks("/health");
 
-            // Only health checks tagged with the "live" tag must pass for app to be considered alive
-            app.MapHealthChecks("/alive", new HealthCheckOptions
-            {
-                Predicate = r => r.Tags.Contains("live")
-            });
-        }
+        //     // Only health checks tagged with the "live" tag must pass for app to be considered alive
+        //     app.MapHealthChecks("/alive", new HealthCheckOptions
+        //     {
+        //         Predicate = r => r.Tags.Contains("live")
+        //     });
+        // }
 
         return app;
     }
